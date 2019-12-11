@@ -188,8 +188,7 @@ class ServiceClient
     }
     bool call(T item)
     {
-        _client.call(item);
-        if(item.response.ack) // confirmed ack 
+        if(_client.call(item)) // confirmed ack 
         {
             setCommStatus(true);
             return true;
