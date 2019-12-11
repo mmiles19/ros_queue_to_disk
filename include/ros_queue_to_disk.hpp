@@ -4,12 +4,9 @@
 #include <ros/ros.h>
 #include <fstream>
 #include <filesystem>
-// #include <algorithm>
 #include <boost/thread.hpp>
 #include <cerrno>
-#include <mutex>
-// #include <marble_artifact_detection_msgs/ArtifactView.h>
-// #include "marble_artifact_detection_msgs/ReceiveArtifactView.h"
+// #include <mutex>
 
 namespace fs = std::filesystem;
 
@@ -73,7 +70,7 @@ class ServiceClient
         char* buffer = new char[serial_size];
         ros::serialization::OStream stream(reinterpret_cast<uint8_t*>(buffer), serial_size);
         ros::serialization::serialize(stream, item.request);
-        ROS_INFO("Queuing %s %u", filepath.c_str(), item.request.msg);
+        ROS_INFO("Queuing %s", filepath.c_str());
         try
         {
             // std::lock_guard<std::mutex> lock(_file_mutex);
@@ -142,7 +139,7 @@ class ServiceClient
         // std::lock_guard<std::mutex> unlock(_file_mutex);
         ros::serialization::IStream stream(reinterpret_cast<uint8_t*>(buffer), serial_size);
         ros::serialization::deserialize(stream, item->request);
-        ROS_INFO("Dequeuing %s %u", file.path().string().c_str(), item->request.msg);
+        ROS_INFO("Dequeuing %s", file.path().string().c_str());
         _queue_size--;
         return true;
     }
@@ -188,7 +185,8 @@ class ServiceClient
     }
     bool call(T item)
     {
-        if(_client.call(item)) // confirmed ack 
+        bool success = _client.call(item);
+        if(success) // check if service call succeeded 
         {
             setCommStatus(true);
             return true;
