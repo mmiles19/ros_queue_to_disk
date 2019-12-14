@@ -8,6 +8,13 @@
 #include <cerrno>
 // #include <mutex>
 
+#ifdef DEBUG_TEST_IMAGE
+#include <cv_bridge/cv_bridge.h>
+#include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/highgui.hpp>
+#endif
+
 namespace fs = std::filesystem;
 
 // void demo_perms(fs::perms p)
@@ -141,6 +148,20 @@ class ServiceClient
         ros::serialization::deserialize(stream, item->request);
         ROS_INFO("Dequeuing %s", file.path().string().c_str());
         _queue_size--;
+
+#ifdef DEBUG_TEST_IMAGE
+        cv_bridge::CvImagePtr cv_ptr;
+        try {
+            cv_ptr = cv_bridge::toCvCopy(item->request.test_img, item->request.test_img.encoding);
+        } catch (cv_bridge::Exception& e) {
+            ROS_ERROR("cv_bridge exception: %s", e.what());
+            return 0;
+        }
+        cv::namedWindow( "Dequeued image", cv::WINDOW_AUTOSIZE );
+        cv::imshow( "Dequeued image", cv_ptr->image );
+        cv::waitKey(0);
+#endif 
+
         return true;
     }
 
@@ -169,6 +190,12 @@ class ServiceClient
     }
     ~ServiceClient()
     {
+        if(_dequeue_thread) {
+            _dequeue_thread->join();
+        }
+        delete _dequeue_thread;
+        _dequeue_thread = 0;
+
         if(fs::exists(_queue_dir))
         {
             if(!fs::remove_all(_queue_dir))
@@ -176,12 +203,6 @@ class ServiceClient
                 ROS_ERROR("Failed to delete contents of existing directory");
             }
         }
-
-        if(_dequeue_thread) {
-            _dequeue_thread->join();
-        }
-        delete _dequeue_thread;
-        _dequeue_thread = 0;
     }
     bool call(T item)
     {

@@ -1,35 +1,72 @@
 project( ros_queue_to_disk )
 cmake_minimum_required(VERSION 2.8)
 
-set(BOOST_LIBS thread)
-find_package( Boost COMPONENTS ${BOOST_LIBS} REQUIRED)
+set(WITH_DEBUG_TEST_IMAGE 0)
+if(WITH_DEBUG_TEST_IMAGE)
+  add_definitions(-DDEBUG_TEST_IMAGE)
+endif()
 
-add_library(${PROJECT_NAME} INTERFACE )
-target_include_directories(${PROJECT_NAME} INTERFACE include ${Boost_INCLUDE_DIRS})
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -Wall")
 
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -Wall -lstdc++fs")
+find_package(OpenCV REQUIRED)
+find_package(catkin REQUIRED
+  COMPONENTS
+    roscpp
+    std_msgs
+    sensor_msgs
+    cv_bridge
+    message_generation
+    )
 
-#
-#find_package(catkin REQUIRED
-#  COMPONENTS
-#    roscpp
-#    )
-#
-#set( _INCLUDE_DIRS
-#            include
-#            ${catkin_INCLUDE_DIRS}
-#       )
-#
-#set( _LIBRARIES
-#               ${catkin_LIBRARIES}
-#        )
-#
-#set( ${PROJECT_NAME}_INCLUDE_DIRS ${_INCLUDE_DIRS}  CACHE INTERNAL "" FORCE )
-#set( ${PROJECT_NAME}_LIBRARIES  ${_LIBRARIES} CACHE INTERNAL "" FORCE )
-#
-#include_directories( ${INCLUDE_DIRS} )
-#
-##add_library( ${PROJECT_NAME}_LIBRARIES SHARED ${SRCS} ${HDRS} )
-#target_link_libraries( ros_queue_to_disk ${_LIBRARIES} )
-#
-#-lstdc++fs 
+set( _INCLUDE_DIRS
+            ${catkin_INCLUDE_DIRS}
+            include
+      )
+
+set( _LIBRARIES
+            ${catkin_LIBRARIES}
+      )
+
+add_service_files(
+  DIRECTORY
+  srv
+  FILES
+  TestInt.srv
+  TestImage.srv
+)
+
+generate_messages(
+  DEPENDENCIES
+  roscpp
+  std_msgs
+  sensor_msgs
+)
+
+catkin_package(
+  INCLUDE_DIRS
+  CATKIN_DEPENDS message_runtime
+)
+
+include_directories( ${_INCLUDE_DIRS} )
+
+# test_int
+if(NOT WITH_DEBUG_TEST_IMAGE)
+  
+add_executable(test_int_server tests/test_int_server.cpp)
+target_link_libraries( test_int_server ${_LIBRARIES} )
+set_target_properties( test_int_server PROPERTIES LINKER_LANGUAGE CXX)
+
+add_executable(test_int_client tests/test_int_client.cpp)
+target_link_libraries( test_int_client ${_LIBRARIES} )
+set_target_properties( test_int_client PROPERTIES LINKER_LANGUAGE CXX)
+
+endif()
+
+# test_image
+add_executable(test_image_server tests/test_image_server.cpp)
+target_link_libraries( test_image_server ${_LIBRARIES} )
+set_target_properties( test_image_server PROPERTIES LINKER_LANGUAGE CXX)
+
+add_executable(test_image_client tests/test_image_client.cpp)
+target_link_libraries( test_image_client ${_LIBRARIES} ${OpenCV_LIBS} )
+set_target_properties( test_image_client PROPERTIES LINKER_LANGUAGE CXX)
