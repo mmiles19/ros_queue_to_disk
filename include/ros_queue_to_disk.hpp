@@ -6,6 +6,8 @@
 #include <filesystem>
 #include <boost/thread.hpp>
 #include <cerrno>
+#include <queue>
+#include <ctime>
 // #include <mutex>
 
 #ifdef DEBUG_TEST_IMAGE
@@ -31,6 +33,8 @@ namespace fs = std::filesystem;
 //               << '\n';
 // }
 
+typedef std::chrono::high_resolution_clock Time;
+
 namespace ros_queue_to_disk {
 // using namespace fs = std::filesystem;
 
@@ -44,11 +48,17 @@ class ServiceClient
     std::fstream _fstream;
     ros::ServiceClient _client;
     boost::thread* _dequeue_thread;
-    uint _queue_size;
+    // uint _queue_size;
+    uint _queue_idx_incr = 0;
     uint _max_queue_size;
     bool _comm_status_is_connected;
     uint _comm_status_count;
     // std::mutex _file_mutex;
+    std::queue<std::string> _queued_files;
+    // std::time_t _timer;
+    // float _timer;
+    Time::time_point _timer;
+    const float _timer_limit;
 
     void setCommStatus(bool status)
     {
@@ -56,28 +66,29 @@ class ServiceClient
         _comm_status_count++;
         _comm_status_is_connected = status;
     }
-    std::string calcFileName(T item, uint8_t idx)
+    std::string calcFileName(T item)
     {
+        uint idx = _queue_idx_incr++;
         char format_char[std::to_string(_max_queue_size).length()+1];
         sprintf(format_char,"%0*u",std::to_string(_max_queue_size).length(),idx);
         std::string filename = std::string(ros::service_traits::md5sum(item)) + "_" + std::string(format_char);
         return filename;
     }
-    std::string calcFilePath(T item, uint8_t idx)
+    std::string calcFilePath(T item)
     {
-        std::string filepath = _queue_dir + calcFileName(item, idx);
+        std::string filepath = _queue_dir + calcFileName(item);
         return filepath;
     }
     bool queueToDisk(T item)
     {
-        if(_queue_size >= _max_queue_size){ return false; }
+        if(_queued_files.size() >= _max_queue_size){ return false; }
        
-        std::string filepath = calcFilePath(item, _queue_size);
+        std::string filepath = calcFilePath(item);
         uint32_t serial_size = ros::serialization::serializationLength(item.request);
         char* buffer = new char[serial_size];
         ros::serialization::OStream stream(reinterpret_cast<uint8_t*>(buffer), serial_size);
         ros::serialization::serialize(stream, item.request);
-        ROS_INFO("Queuing %s", filepath.c_str());
+        ROS_INFO("Queuing %s.", filepath.c_str());
         try
         {
             // std::lock_guard<std::mutex> lock(_file_mutex);
@@ -88,7 +99,7 @@ class ServiceClient
             
             if(!_fstream)
             {
-                ROS_ERROR("Failed to open file: %s", std::strerror(errno));
+                ROS_ERROR("Failed to open file: %s.", std::strerror(errno));
                 return false;
             }
             _fstream.write(buffer,serial_size);
@@ -102,26 +113,27 @@ class ServiceClient
             return false;
         }
         // std::lock_guard<std::mutex> unlock(_file_mutex);
-        _queue_size++;
+        // _queue_size++;
+        _queued_files.push(filepath);
         return true;
     }
-    bool dequeueFromDisk(T* item, std::string filename = "")
+    bool dequeueFromDisk(T* item, std::string filepath)
     {
         // auto& file = fs::directory_iterator(_queue_dir), begin;
         fs::directory_entry file;
-        if (!filename.empty())
-        {
-            file.assign(fs::path(_queue_dir + filename));
-            // for (const auto& file_temp : fs::directory_iterator(_queue_dir)) 
-            // {
-            //     if(file_temp.path().filename()==filename){ file = file_temp; break; }
-            // }
-        }
-        else
-        {
-            std::string filepath = calcFilePath(*item, _queue_size-1);
+        // if (!filename.empty())
+        // {
+        //     file.assign(fs::path(_queue_dir + filename));
+        //     // for (const auto& file_temp : fs::directory_iterator(_queue_dir)) 
+        //     // {
+        //     //     if(file_temp.path().filename()==filename){ file = file_temp; break; }
+        //     // }
+        // }
+        // else
+        // {
+        //     std::string filepath = calcFilePath(*item, _queue_size-1);
             file.assign(filepath);
-        }
+        // }
         // uint32_t serial_size = ros::serialization::serializationLength(item->request);
 
         uint32_t serial_size = fs::file_size(file.path());
@@ -134,7 +146,7 @@ class ServiceClient
             _fstream.open(file.path().string(), std::fstream::in);
             _fstream.read(buffer,serial_size);
             _fstream.close();
-            fs::remove(file);
+            // fs::remove(file);
         }
         catch(const std::exception& e)
         {
@@ -146,8 +158,9 @@ class ServiceClient
         // std::lock_guard<std::mutex> unlock(_file_mutex);
         ros::serialization::IStream stream(reinterpret_cast<uint8_t*>(buffer), serial_size);
         ros::serialization::deserialize(stream, item->request);
-        ROS_INFO("Dequeuing %s", file.path().string().c_str());
-        _queue_size--;
+        // ROS_INFO("Dequeuing %s", file.path().string().c_str());
+        // _queue_size--;
+        // _queued_files.pop();
 
 #ifdef DEBUG_TEST_IMAGE
         cv_bridge::CvImagePtr cv_ptr;
@@ -162,45 +175,96 @@ class ServiceClient
         cv::waitKey(0);
 #endif 
 
-        return true;
+        bool success = _client.call(*item);
+        if(success)
+        {
+            setCommStatus(true);
+            ROS_INFO("Dequeuing %s.", _queued_files.front().c_str());
+            fs::remove(_queued_files.front());
+            _queued_files.pop();
+        }
+        else
+        {
+            setCommStatus(false);
+            ROS_INFO("Attempt to dequeue %s failed.",_queued_files.front().c_str());
+        }
+
+        return success;
+    }
+
+    void dequeueThreadFunc()
+    {
+        // _timer = std::clock();
+        // time(&_timer);
+        _timer = Time::now();
+        while(ros::ok())
+        {
+            if((_comm_status_is_connected || timerHasExpired()/*difftime(std::clock(),_timer)/CLOCKS_PER_SEC>_timer_limit*/) && _queued_files.size()>0)
+            {
+                _timer = Time::now();
+                // _timer = std::clock();
+                // time(&_timer);
+                T srv;
+                // if (!dequeueFromDisk(&srv,_queued_files.front())){ continue; }
+                dequeueFromDisk(&srv,_queued_files.front());
+                // call(srv);
+                // usleep(100);
+            }
+            usleep(10e3);
+        }
+    }
+
+    bool timerHasExpired()
+    {   
+        // std::time_t now = std::time(NULL);
+        // std::time_t diff_time = difftime(now,_timer);
+        // bool has_expired = diff_time > _timer_limit;
+        // return has_expired;
+
+        Time::time_point now = Time::now();
+        // std::chrono::duration<float> diff = now - _timer;
+        std::chrono::duration<double> diff = std::chrono::duration_cast<std::chrono::duration<double>>(now - _timer);
+        float fdiff = diff.count();
+        return fdiff>_timer_limit;
     }
 
     public:
-    ServiceClient(ros::NodeHandle* nh, std::string srv_name, uint max_queue_size = -1, std::string queue_dir = "/home/mike/.queue_to_disk/") :
+    ServiceClient(ros::NodeHandle* nh, std::string srv_name, uint max_queue_size = -1, std::string queue_dir = "/home/mike/.queue_to_disk/", float timer_limit = 5.0) :
         _nh(nh),
         _srv_name(srv_name),
-        _queue_dir(queue_dir),
         _max_queue_size(max_queue_size),
-        _dequeue_thread(0),
-        _queue_size(0)
+        _queue_dir(queue_dir),
+        _timer_limit(timer_limit)
     {
         if(fs::exists(_queue_dir))
         {
             if(!fs::remove_all(_queue_dir))
             {
-                ROS_ERROR("Failed to delete contents of existing directory");
+                ROS_ERROR("Failed to delete contents of existing directory.");
             }
         }
         if(!fs::create_directories(_queue_dir))
         {
-            ROS_ERROR("Failed to create directory");
+            ROS_ERROR("Failed to create temporary directory.");
         }
         _client = _nh->serviceClient<T>(_srv_name, false);
         _dequeue_thread = new boost::thread(std::bind(&ServiceClient::dequeueThreadFunc,this));
     }
     ~ServiceClient()
     {
+        // kill dequeue thread
         if(_dequeue_thread) {
             _dequeue_thread->join();
         }
         delete _dequeue_thread;
         _dequeue_thread = 0;
 
+        // delete temporary directory
         if(fs::exists(_queue_dir))
         {
             if(!fs::remove_all(_queue_dir))
             {
-                ROS_ERROR("Failed to delete contents of existing directory");
+                ROS_ERROR("Failed to delete contents of temporary directory.");
             }
         }
     }
@@ -220,20 +284,7 @@ class ServiceClient
         }
     }
     bool hasComms(){ return _comm_status_is_connected; }
-    void dequeueThreadFunc()
-    {
-        while(true)
-        {
-            while(_comm_status_is_connected && _queue_size>0)
-            {
-                T srv;
-                if (!dequeueFromDisk(&srv)){ continue; }
-                call(srv);
-                usleep(100);
-            }
-            usleep(10e3);
-        }
-    }
+    
 
 };
 
