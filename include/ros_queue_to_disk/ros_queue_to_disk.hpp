@@ -52,7 +52,9 @@ class ServiceClient
     boost::thread* _dequeue_thread;
     // uint _queue_size;
     uint _queue_idx_incr = 0;
-    uint _max_queue_size;
+    uint _max_queue_size; // queue length (num elements)
+    ulong _max_queue_dir_size; // in bytes
+    ulong _current_queue_dir_size = 0;
     bool _comm_status_is_connected;
     uint _comm_status_count;
     // std::mutex _file_mutex;
@@ -83,14 +85,23 @@ class ServiceClient
     }
     bool queueToDisk(T item)
     {
-        if(_queued_files.size() >= _max_queue_size){ return false; }
+        if (_queued_files.size() >= _max_queue_size) 
+        { 
+            ROS_WARN("Queue full. Aborting queueToDisk.");
+            return false; 
+        }
+        if ( (_current_queue_dir_size+sizeof(item)) > _max_queue_dir_size) 
+        { 
+            ROS_WARN("Queue directory full. Aborting queueToDisk.");
+            return false; 
+        }
        
         std::string filepath = calcFilePath(item);
         uint32_t serial_size = ros::serialization::serializationLength(item.request);
         char* buffer = new char[serial_size];
         ros::serialization::OStream stream(reinterpret_cast<uint8_t*>(buffer), serial_size);
         ros::serialization::serialize(stream, item.request);
-        ROS_INFO("Queuing %s.", filepath.c_str());
+        ROS_INFO("Queuing %s. Size %d.", filepath.c_str(), sizeof(item));
         try
         {
             // std::lock_guard<std::mutex> lock(_file_mutex);
@@ -117,6 +128,7 @@ class ServiceClient
         // std::lock_guard<std::mutex> unlock(_file_mutex);
         // _queue_size++;
         _queued_files.push(filepath);
+        _current_queue_dir_size += sizeof(item);
         return true;
     }
     bool dequeueFromDisk(T* item, std::string filepath)
@@ -181,9 +193,10 @@ class ServiceClient
         if(success)
         {
             setCommStatus(true);
-            ROS_INFO("Dequeuing %s.", _queued_files.front().c_str());
+            ROS_INFO("Dequeuing %s. Size %d.", _queued_files.front().c_str(), sizeof(item));
             fs::remove(_queued_files.front());
             _queued_files.pop();
+            _current_queue_dir_size -= sizeof(item);
         }
         else
         {
@@ -232,12 +245,15 @@ class ServiceClient
 
     public:
     ServiceClient() :
+        _max_queue_size(-1),
+        _max_queue_dir_size(2000000000000),
         _timer_limit(5.0)
     {}
-    ServiceClient(ros::NodeHandle* nh, std::string srv_name, uint max_queue_size = -1, std::string queue_dir = expand_environment_variables("${HOME}/.queue_to_disk/"), float timer_limit = 5.0) :
+    ServiceClient(ros::NodeHandle* nh, std::string srv_name, uint max_queue_size = -1, ulong max_queue_dir_size = 2000000000000, std::string queue_dir = expand_environment_variables("${HOME}/.queue_to_disk/"), float timer_limit = 5.0) :
         _nh(nh),
         _srv_name(srv_name),
         _max_queue_size(max_queue_size),
+        _max_queue_dir_size(max_queue_dir_size),
         _queue_dir(queue_dir),
         _timer_limit(timer_limit)
     {
