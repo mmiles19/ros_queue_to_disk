@@ -1,6 +1,6 @@
 #include <ros/ros.h>
-// #include <ros_queue_to_disk.hpp>
-#include "ros_queue_to_disk.hpp"
+#include <ros_queue_to_disk/ros_queue_to_disk.hpp>
+// #include "ros_queue_to_disk.hpp"
 #include <ros_queue_to_disk/TestInt.h>
 
 std::vector<int> ints;

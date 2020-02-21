@@ -18,14 +18,6 @@ find_package(catkin REQUIRED
     message_generation
     )
 
-set( _INCLUDE_DIRS
-            ${catkin_INCLUDE_DIRS}
-            include
-      )
-
-set( _LIBRARIES
-            ${catkin_LIBRARIES}
-      )
 
 add_service_files(
   DIRECTORY
@@ -43,11 +35,23 @@ generate_messages(
 )
 
 catkin_package(
-  INCLUDE_DIRS
-  CATKIN_DEPENDS message_runtime
+  INCLUDE_DIRS include/
+  CATKIN_DEPENDS message_runtime 
 )
 
+set( _INCLUDE_DIRS
+            ${catkin_INCLUDE_DIRS}
+            include/
+      )
+
+set( _LIBRARIES
+            ${catkin_LIBRARIES}
+      )
+
+
 include_directories( ${_INCLUDE_DIRS} )
+link_libraries(stdc++fs)
+
 
 # test_int
 if(NOT WITH_DEBUG_TEST_IMAGE)
@@ -70,3 +74,8 @@ set_target_properties( test_image_server PROPERTIES LINKER_LANGUAGE CXX)
 add_executable(test_image_client tests/test_image_client.cpp)
 target_link_libraries( test_image_client ${_LIBRARIES} ${OpenCV_LIBS} )
 set_target_properties( test_image_client PROPERTIES LINKER_LANGUAGE CXX)
+
+install(DIRECTORY include/${PROJECT_NAME}/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+  FILES_MATCHING PATTERN "*.hpp"
+  PATTERN ".svn" EXCLUDE)

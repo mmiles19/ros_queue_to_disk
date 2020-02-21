@@ -3,11 +3,13 @@
 
 #include <ros/ros.h>
 #include <fstream>
-#include <filesystem>
+// #include <filesystem>
+#include <experimental/filesystem>
 #include <boost/thread.hpp>
 #include <cerrno>
 #include <queue>
 #include <ctime>
+#include <string>
 // #include <mutex>
 
 #ifdef DEBUG_TEST_IMAGE
@@ -17,7 +19,7 @@
 #include <opencv2/highgui.hpp>
 #endif
 
-namespace fs = std::filesystem;
+namespace fs = std::experimental::filesystem;
 
 // void demo_perms(fs::perms p)
 // {
@@ -229,7 +231,10 @@ class ServiceClient
     }
 
     public:
-    ServiceClient(ros::NodeHandle* nh, std::string srv_name, uint max_queue_size = -1, std::string queue_dir = "/home/mike/.queue_to_disk/", float timer_limit = 5.0) :
+    ServiceClient() :
+        _timer_limit(5.0)
+    {}
+    ServiceClient(ros::NodeHandle* nh, std::string srv_name, uint max_queue_size = -1, std::string queue_dir = expand_environment_variables("${HOME}/.queue_to_disk/"), float timer_limit = 5.0) :
         _nh(nh),
         _srv_name(srv_name),
         _max_queue_size(max_queue_size),
@@ -284,7 +289,24 @@ class ServiceClient
         }
     }
     bool hasComms(){ return _comm_status_is_connected; }
-    
+    static std::string expand_environment_variables( const std::string &s ) {
+        if( s.find( "${" ) == std::string::npos ) return s;
+
+        std::string pre  = s.substr( 0, s.find( "${" ) );
+        std::string post = s.substr( s.find( "${" ) + 2 );
+
+        if( post.find( '}' ) == std::string::npos ) return s;
+
+        std::string variable = post.substr( 0, post.find( '}' ) );
+        std::string value    = "";
+
+        post = post.substr( post.find( '}' ) + 1 );
+
+        const auto *v = getenv( variable.c_str() );
+        if( v != NULL ) value = std::string( v );
+
+        return expand_environment_variables( pre + value + post );
+    }
 
 };
 
