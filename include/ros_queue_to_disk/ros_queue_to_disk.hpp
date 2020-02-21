@@ -52,8 +52,8 @@ class ServiceClient
     boost::thread* _dequeue_thread;
     // uint _queue_size;
     uint _queue_idx_incr = 0;
-    uint _max_queue_size; // queue length (num elements)
-    ulong _max_queue_dir_size; // in bytes
+    const uint _max_queue_size; // queue length (num elements)
+    const ulong _max_queue_dir_size; // in bytes
     ulong _current_queue_dir_size = 0;
     bool _comm_status_is_connected;
     uint _comm_status_count;
